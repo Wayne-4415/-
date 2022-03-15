@@ -1,0 +1,160 @@
+LIBNAME NH 'C:\輔仁大學臨時工\吳醫師case1';RUN;
+LIBNAME NH_ICD 'C:\輔仁大學臨時工\吳醫師case1\ICD';RUN;
+LIBNAME  NHIRD'C:\輔仁大學臨時工\吳醫師case1';RUN;
+
+/*從EXCEL檔建立TABLE*/
+PROC IMPORT OUT = ICD9  /*醫生給的ICD EXCEL對照檔*/
+	DATAFILE = "C:\輔仁大學臨時工\吳醫師case1\ICD9整理_疾病碼確認_彙整20220307.xlsx"
+	DBMS = EXCEL REPLACE;
+;
+QUIT;
+
+/*從ICD9讀取pregnant的ICD並寫入新的table 存在ICD資料夾裡*/
+/*做複數次並得到數個table來排除掉不要的case*/ 
+PROC SQL;
+CREATE TABLE NH_ICD.PREGNANT_ICD AS
+SELECT DISTINCT
+	A.ICD
+FROM ICD9 AS A
+WHERE 
+	A.CAT LIKE 'Pregnancy'
+;
+QUIT;
+/*取CVD的ICD*/
+PROC SQL;
+CREATE TABLE NH_ICD.CVD_ICD AS
+SELECT DISTINCT
+	A.ICD
+FROM ICD9 AS A
+WHERE 
+	A.CAT LIKE 'Non-fatal myocardial infarction' OR
+	A.CAT LIKE 'Hospotalization unstable angia' OR
+	A.CAT LIKE 'Acute myocardial infarction' OR
+	A.CAT LIKE 'Coronary artery disease' OR
+	A.CAT LIKE 'Chronic heart failure'
+;
+QUIT;
+/*取Malignancy的ICD*/
+PROC SQL;
+CREATE TABLE NH_ICD.Malignancy_ICD AS
+SELECT DISTINCT
+	A.ICD
+FROM ICD9 AS A
+WHERE 
+	A.CAT LIKE 'Ovarian cancer' OR
+	A.CAT LIKE 'endometrial cancer' OR
+	A.CAT LIKE 'breast cancer'
+;
+QUIT;
+/*取Ophthalmic的ICD*/
+PROC SQL;
+CREATE TABLE NH_ICD.Ophthalmic_ICD AS
+SELECT DISTINCT
+	A.ICD
+FROM ICD9 AS A
+WHERE 
+	A.CAT LIKE 'Glaucoma' OR
+	A.CAT LIKE 'Diabetic retinopathy' OR
+	A.CAT LIKE 'Retinal detachment'
+;
+QUIT;
+/*取CKD的ICD*/
+PROC SQL;
+CREATE TABLE NH_ICD.CKD_ICD AS
+SELECT DISTINCT
+	A.ICD
+FROM ICD9 AS A
+WHERE 
+	A.CAT LIKE 'CKD'
+;
+QUIT;
+/*取Non-spontaneous abortion(Illegal abortion)的ICD*/
+PROC SQL;
+CREATE TABLE NH_ICD.Non_spontaneous_abortion_ICD AS
+SELECT DISTINCT
+	A.ICD
+FROM ICD9 AS A
+WHERE 
+	A.CAT LIKE 'Non-spontaneous abortion(Illegal abortion)'
+;
+QUIT;
+/* 測試用
+先設表格640 641為懷孕ICD號碼
+DATA ICD_PREGNANT; 
+	INPUT ICD $;
+	CARDS;
+640
+641
+;
+RUN;
+*/
+
+
+
+/*撈取 ICD9CM_CODE, ICD9CM_CODE_1, ICD9CM_CODE_2, ICD9CM_CODE_3, ICD9CM_CODE_4
+ 中符合NH.PREGNANT_ICD中ICD的人數*/
+%macro read_pregnant(year);
+	PROC SQL;
+	CREATE TABLE NH.PREGNANT&year AS
+	SELECT DISTINCT
+		A.ID,
+		CATS(A.ID_BIRTHDAY,'15') AS ID_BIRTHDAY, /*將生日設為15號  資料型態為YYMMDD8.*/
+		A.IN_DATE, 
+		FLOOR(
+			YRDIF(
+				INPUT(CATS(A.ID_BIRTHDAY,'15'),YYMMDD8.),
+				INPUT(A.IN_DATE,YYMMDD8.),
+			'ACT/ACT')
+		) AS AGE,
+		A.ICD9CM_CODE,
+		A.ICD9CM_CODE_1,
+		A.ICD9CM_CODE_2,
+		A.ICD9CM_CODE_3,
+		A.ICD9CM_CODE_4    /*先取五個ICD ID ID生日 入院日期 這8個*/
+	FROM NH.DD&year  AS A
+	WHERE 
+		ICD9CM_CODE IN (SELECT ICD FROM NH_ICD.PREGNANT_ICD) OR
+		ICD9CM_CODE_1 IN (SELECT ICD FROM NH_ICD.PREGNANT_ICD) OR
+		ICD9CM_CODE_2 IN (SELECT ICD FROM NH_ICD.PREGNANT_ICD) OR
+		ICD9CM_CODE_3 IN (SELECT ICD FROM NH_ICD.PREGNANT_ICD) OR
+		ICD9CM_CODE_4 IN (SELECT ICD FROM NH_ICD.PREGNANT_ICD) 
+	;
+	QUIT;
+%mend;
+/*先跑出2007 ~2009的懷孕人數*/
+%read_pregnant(2007);
+%read_pregnant(2008);
+%read_pregnant(2009);
+PROC SQL; 
+CREATE TABLE NH.PREGNANT_UNION AS 
+SELECT *
+FROM NH.PREGNANT2007
+UNION 
+SELECT*
+FROM NH.PREGNANT2008
+UNION 
+SELECT*
+FROM NH.PREGNANT2009
+;
+QUIT;
+
+PROC SQL;
+/*先排除未成年的*/
+CREATE TABLE NH.PREGNANT_UNION_ADULT AS
+SELECT DISTINCT
+	A.ID,
+	CATS(A.ID_BIRTHDAY,'15') AS ID_BIRTHDAY, 
+	A.IN_DATE, 
+	A.AGE,
+	A.ICD9CM_CODE,
+	A.ICD9CM_CODE_1,
+	A.ICD9CM_CODE_2,
+	A.ICD9CM_CODE_3,
+	A.ICD9CM_CODE_4    
+FROM NH.PREGNANT_UNION AS A
+WHERE 
+	A.AGE >= 18
+;
+QUIT;	
+
+
